@@ -59,25 +59,25 @@ type task struct {
 	WorkerId string  `json:"worker_id"`
 }
 
-type Exporter struct {
+type collector struct {
 	URI string
 	up  prometheus.Gauge
 }
 
-func (e *Exporter) Describe(ch chan<- *prometheus.Desc) {
+func (c *collector) Describe(ch chan<- *prometheus.Desc) {
 	// Unchecked collector, so `Describe` is intentionally empty
 }
 
-func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
+func (c *collector) Collect(ch chan<- prometheus.Metric) {
 	client := http.Client{
 		Timeout: 3 * time.Second,
 	}
-	e.up.Set(0)
+	c.up.Set(0)
 
-	response, err := client.Get(e.URI + "/connectors")
+	response, err := client.Get(c.URI + "/connectors")
 	if err != nil {
 		log.Errorf("Can't scrape kafka connect: %v", err)
-		ch <- e.up
+		ch <- c.up
 		return
 	}
 	defer func() {
@@ -91,23 +91,23 @@ func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
 	output, err := ioutil.ReadAll(response.Body)
 	if err != nil {
 		log.Errorf("Can't scrape kafka connect: %v", err)
-		ch <- e.up
+		ch <- c.up
 		return
 	}
 
 	var connectorsList connectors
 	if err := json.Unmarshal(output, &connectorsList); err != nil {
 		log.Errorf("Can't scrape kafka connect: %v", err)
-		ch <- e.up
+		ch <- c.up
 		return
 	}
 
-	e.up.Set(1)
-	ch <- e.up
+	c.up.Set(1)
+	ch <- c.up
 
 	for _, connector := range connectorsList {
 
-		connectorStatusResponse, err := client.Get(e.URI + "/connectors/" + connector + "/status")
+		connectorStatusResponse, err := client.Get(c.URI + "/connectors/" + connector + "/status")
 		if err != nil {
 			log.Errorf("Can't get /status for: %v", err)
 			continue
@@ -155,10 +155,10 @@ func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
 	return
 }
 
-func newExporter(uri string) *Exporter {
+func newExporter(uri string) *collector {
 	log.Infoln("Collecting data from:", uri)
 
-	return &Exporter{
+	return &collector{
 		URI: uri,
 		up: prometheus.NewGauge(prometheus.GaugeOpts{
 			Namespace: nameSpace,
