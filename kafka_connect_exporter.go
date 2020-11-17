@@ -1,15 +1,12 @@
 package main
 
 import (
-	"encoding/json"
 	"flag"
 	"fmt"
-	"io/ioutil"
 	"net/http"
 	"net/url"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -40,25 +37,6 @@ var (
 		nil)
 )
 
-type connectors []string
-
-type status struct {
-	Name      string    `json:"name"`
-	Connector connector `json:"connector"`
-	Tasks     []task    `json:"tasks"`
-}
-
-type connector struct {
-	State    string `json:"state"`
-	WorkerId string `json:"worker_id"`
-}
-
-type task struct {
-	State    string  `json:"state"`
-	Id       float64 `json:"id"`
-	WorkerId string  `json:"worker_id"`
-}
-
 type collector struct {
 	URI     string
 	upGauge prometheus.Gauge
@@ -69,88 +47,51 @@ func (c *collector) Describe(ch chan<- *prometheus.Desc) {
 }
 
 func (c *collector) Collect(ch chan<- prometheus.Metric) {
-	client := http.Client{
-		Timeout: 3 * time.Second,
+	connectClient := connectClient{
+		URI: c.URI,
 	}
-	c.upGauge.Set(0)
 
-	response, err := client.Get(c.URI + "/connectors")
+	connectorList, err := connectClient.fetchConnectors()
 	if err != nil {
-		log.Errorf("Can't scrape kafka connect: %v", err)
+		c.upGauge.Set(0)
 		ch <- c.upGauge
+		log.Errorf("Failed to fetch connector list, aborting: %w", err)
 		return
 	}
-	defer func() {
-		err = response.Body.Close()
+
+	for _, connectorName := range connectorList {
+		status, err := connectClient.fetchConnectorStatus(connectorName)
 		if err != nil {
-			log.Errorf("Can't close connection to kafka connect: %v", err)
+			c.upGauge.Set(0)
+			ch <- c.upGauge
+			log.Errorf("Failed to fetch connector status for '%s': %w", connectorName, err)
 			return
-		}
-	}()
-
-	output, err := ioutil.ReadAll(response.Body)
-	if err != nil {
-		log.Errorf("Can't scrape kafka connect: %v", err)
-		ch <- c.upGauge
-		return
-	}
-
-	var connectorsList connectors
-	if err := json.Unmarshal(output, &connectorsList); err != nil {
-		log.Errorf("Can't scrape kafka connect: %v", err)
-		ch <- c.upGauge
-		return
-	}
-
-	c.upGauge.Set(1)
-	ch <- c.upGauge
-
-	for _, connector := range connectorsList {
-
-		connectorStatusResponse, err := client.Get(c.URI + "/connectors/" + connector + "/status")
-		if err != nil {
-			log.Errorf("Can't get /status for: %v", err)
-			continue
-		}
-
-		connectorStatusOutput, err := ioutil.ReadAll(connectorStatusResponse.Body)
-		if err != nil {
-			log.Errorf("Can't read Body for: %v", err)
-			continue
-		}
-
-		var connectorStatus status
-		if err := json.Unmarshal(connectorStatusOutput, &connectorStatus); err != nil {
-			log.Errorf("Can't decode response for: %v", err)
-			continue
 		}
 
 		ch <- prometheus.MustNewConstMetric(
 			isConnectorRunningDesc,
 			prometheus.GaugeValue,
 			1,
-			connectorStatus.Name,
-			strings.ToLower(connectorStatus.Connector.State),
-			connectorStatus.Connector.WorkerId,
+			status.Name,
+			strings.ToLower(status.Connector.State),
+			status.Connector.WorkerId,
 		)
 
-		for _, connectorTask := range connectorStatus.Tasks {
+		for _, task := range status.Tasks {
 			ch <- prometheus.MustNewConstMetric(
 				areConnectorTasksRunningDesc,
 				prometheus.GaugeValue,
 				1,
-				connectorStatus.Name,
-				strings.ToLower(connectorTask.State),
-				connectorTask.WorkerId,
-				fmt.Sprintf("%d", int(connectorTask.Id)),
+				status.Name,
+				strings.ToLower(task.State),
+				task.WorkerId,
+				fmt.Sprintf("%d", int(task.Id)),
 			)
 		}
-
-		err = connectorStatusResponse.Body.Close()
-		if err != nil {
-			log.Errorf("Can't close connection to connector: %v", err)
-		}
 	}
+
+	c.upGauge.Set(1)
+	ch <- c.upGauge
 
 	return
 }
@@ -160,7 +101,7 @@ func newExporter(uri string) *collector {
 
 	return &collector{
 		URI: uri,
-		up: prometheus.NewGauge(prometheus.GaugeOpts{
+		upGauge: prometheus.NewGauge(prometheus.GaugeOpts{
 			Namespace: nameSpace,
 			Name:      "up",
 			Help:      "Was the last scrape of kafka connect successful?",
