@@ -60,17 +60,15 @@ type task struct {
 }
 
 type Exporter struct {
-	URI             string
-	up              prometheus.Gauge
-	connectorsCount prometheus.Gauge
+	URI string
+	up  prometheus.Gauge
 }
 
 func (e *Exporter) Describe(ch chan<- *prometheus.Desc) {
-	e.up.Describe(ch)
+	// Unchecked collector, so `Describe` is intentionally empty
 }
 
 func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
-
 	client := http.Client{
 		Timeout: 3 * time.Second,
 	}
@@ -86,7 +84,6 @@ func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
 		err = response.Body.Close()
 		if err != nil {
 			log.Errorf("Can't close connection to kafka connect: %v", err)
-			ch <- e.up
 			return
 		}
 	}()
@@ -106,10 +103,7 @@ func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
 	}
 
 	e.up.Set(1)
-	e.connectorsCount.Set(float64(len(connectorsList)))
-
 	ch <- e.up
-	ch <- e.connectorsCount
 
 	for _, connector := range connectorsList {
 
@@ -161,7 +155,7 @@ func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
 	return
 }
 
-func NewExporter(uri string) *Exporter {
+func newExporter(uri string) *Exporter {
 	log.Infoln("Collecting data from:", uri)
 
 	return &Exporter{
@@ -169,13 +163,7 @@ func NewExporter(uri string) *Exporter {
 		up: prometheus.NewGauge(prometheus.GaugeOpts{
 			Namespace: nameSpace,
 			Name:      "up",
-			Help:      "was the last scrape of kafka connect successful?",
-		}),
-		connectorsCount: prometheus.NewGauge(prometheus.GaugeOpts{
-			Namespace: nameSpace,
-			Subsystem: "connectors",
-			Name:      "count",
-			Help:      "number of deployed connectors",
+			Help:      "Was the last scrape of kafka connect successful?",
 		}),
 	}
 
@@ -208,7 +196,7 @@ func main() {
 
 	prometheus.Unregister(prometheus.NewGoCollector())
 	prometheus.Unregister(prometheus.NewProcessCollector(prometheus.ProcessCollectorOpts{}))
-	prometheus.MustRegister(NewExporter(*scrapeURI))
+	prometheus.MustRegister(newExporter(*scrapeURI))
 
 	http.Handle(*metricsPath, promhttp.Handler())
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
