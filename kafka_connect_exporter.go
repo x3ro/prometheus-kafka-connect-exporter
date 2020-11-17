@@ -60,8 +60,8 @@ type task struct {
 }
 
 type collector struct {
-	URI string
-	up  prometheus.Gauge
+	URI     string
+	upGauge prometheus.Gauge
 }
 
 func (c *collector) Describe(ch chan<- *prometheus.Desc) {
@@ -72,12 +72,12 @@ func (c *collector) Collect(ch chan<- prometheus.Metric) {
 	client := http.Client{
 		Timeout: 3 * time.Second,
 	}
-	c.up.Set(0)
+	c.upGauge.Set(0)
 
 	response, err := client.Get(c.URI + "/connectors")
 	if err != nil {
 		log.Errorf("Can't scrape kafka connect: %v", err)
-		ch <- c.up
+		ch <- c.upGauge
 		return
 	}
 	defer func() {
@@ -91,19 +91,19 @@ func (c *collector) Collect(ch chan<- prometheus.Metric) {
 	output, err := ioutil.ReadAll(response.Body)
 	if err != nil {
 		log.Errorf("Can't scrape kafka connect: %v", err)
-		ch <- c.up
+		ch <- c.upGauge
 		return
 	}
 
 	var connectorsList connectors
 	if err := json.Unmarshal(output, &connectorsList); err != nil {
 		log.Errorf("Can't scrape kafka connect: %v", err)
-		ch <- c.up
+		ch <- c.upGauge
 		return
 	}
 
-	c.up.Set(1)
-	ch <- c.up
+	c.upGauge.Set(1)
+	ch <- c.upGauge
 
 	for _, connector := range connectorsList {
 
