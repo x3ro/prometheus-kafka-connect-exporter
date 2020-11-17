@@ -27,14 +27,17 @@ var (
 	metricsPath   = flag.String("telemetry-path", "/metrics", "Path under which to expose metrics.")
 	scrapeURI     = flag.String("scrape-uri", "http://127.0.0.1:8080", "URI on which to scrape kafka connect.")
 
-	isConnectorRunning = prometheus.NewDesc(
-		prometheus.BuildFQName(nameSpace, "connector", "state_running"),
-		"is the connector running?",
-		[]string{"connector", "state", "worker"}, nil)
-	areConnectorTasksRunning = prometheus.NewDesc(
-		prometheus.BuildFQName(nameSpace, "connector", "tasks_state"),
-		"the state of tasks. 0-failed, 1-running, 2-unassigned, 3-paused",
-		[]string{"connector", "state", "worker_id", "id"}, nil)
+	isConnectorRunningDesc = prometheus.NewDesc(
+		prometheus.BuildFQName(nameSpace, "connector", "state"),
+		"Is the connector up?",
+		[]string{"connector", "state", "worker_id"},
+		nil)
+
+	areConnectorTasksRunningDesc = prometheus.NewDesc(
+		prometheus.BuildFQName(nameSpace, "connector_task", "state"),
+		"Are the tasks for the connector up?",
+		[]string{"connector", "state", "worker_id", "task_id"},
+		nil)
 )
 
 type connectors []string
@@ -128,33 +131,24 @@ func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
 			continue
 		}
 
-		var isRunning float64 = 0
-		if strings.ToLower(connectorStatus.Connector.State) == "running" {
-			isRunning = 1
-		}
-
 		ch <- prometheus.MustNewConstMetric(
-			isConnectorRunning, prometheus.GaugeValue, isRunning,
-			connectorStatus.Name, strings.ToLower(connectorStatus.Connector.State), connectorStatus.Connector.WorkerId,
+			isConnectorRunningDesc,
+			prometheus.GaugeValue,
+			1,
+			connectorStatus.Name,
+			strings.ToLower(connectorStatus.Connector.State),
+			connectorStatus.Connector.WorkerId,
 		)
 
 		for _, connectorTask := range connectorStatus.Tasks {
-
-			var state float64
-			switch taskState := strings.ToLower(connectorTask.State); taskState {
-			case "running":
-				state = 1
-			case "unassigned":
-				state = 2
-			case "paused":
-				state = 3
-			default:
-				state = 0
-			}
-
 			ch <- prometheus.MustNewConstMetric(
-				areConnectorTasksRunning, prometheus.GaugeValue, state,
-				connectorStatus.Name, strings.ToLower(connectorTask.State), connectorTask.WorkerId, fmt.Sprintf("%d", int(connectorTask.Id)),
+				areConnectorTasksRunningDesc,
+				prometheus.GaugeValue,
+				1,
+				connectorStatus.Name,
+				strings.ToLower(connectorTask.State),
+				connectorTask.WorkerId,
+				fmt.Sprintf("%d", int(connectorTask.Id)),
 			)
 		}
 
