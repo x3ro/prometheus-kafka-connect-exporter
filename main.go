@@ -27,19 +27,19 @@ var (
 	isConnectorRunningDesc = prometheus.NewDesc(
 		prometheus.BuildFQName(nameSpace, "connector", "state"),
 		"Is the connector up?",
-		[]string{"connector", "state", "worker_id"},
+		[]string{"scrape_host", "connector", "state", "worker_id"},
 		nil)
 
 	areConnectorTasksRunningDesc = prometheus.NewDesc(
 		prometheus.BuildFQName(nameSpace, "connector_task", "state"),
 		"Are the tasks for the connector up?",
-		[]string{"connector", "state", "worker_id", "task_id"},
+		[]string{"scrape_host", "connector", "state", "worker_id", "task_id"},
 		nil)
 )
 
 type collector struct {
-	URI     string
-	upGauge prometheus.Gauge
+	targetURL url.URL
+	upGauge   prometheus.Gauge
 }
 
 func (c *collector) Describe(ch chan<- *prometheus.Desc) {
@@ -48,7 +48,7 @@ func (c *collector) Describe(ch chan<- *prometheus.Desc) {
 
 func (c *collector) Collect(ch chan<- prometheus.Metric) {
 	connectClient := connectClient{
-		URI: c.URI,
+		URI: c.targetURL.String(),
 	}
 
 	connectorList, err := connectClient.fetchConnectors()
@@ -72,6 +72,7 @@ func (c *collector) Collect(ch chan<- prometheus.Metric) {
 			isConnectorRunningDesc,
 			prometheus.GaugeValue,
 			1,
+			c.targetURL.Hostname(),
 			status.Name,
 			strings.ToLower(status.Connector.State),
 			status.Connector.WorkerId,
@@ -82,6 +83,7 @@ func (c *collector) Collect(ch chan<- prometheus.Metric) {
 				areConnectorTasksRunningDesc,
 				prometheus.GaugeValue,
 				1,
+				c.targetURL.Hostname(),
 				status.Name,
 				strings.ToLower(task.State),
 				task.WorkerId,
@@ -96,15 +98,16 @@ func (c *collector) Collect(ch chan<- prometheus.Metric) {
 	return
 }
 
-func newExporter(uri string) *collector {
-	log.Infoln("Collecting data from:", uri)
+func newExporter(targetURL url.URL) *collector {
+	log.Infoln("Collecting data from:", targetURL)
 
 	return &collector{
-		URI: uri,
+		targetURL: targetURL,
 		upGauge: prometheus.NewGauge(prometheus.GaugeOpts{
-			Namespace: nameSpace,
-			Name:      "up",
-			Help:      "Was the last scrape of kafka connect successful?",
+			Namespace:   nameSpace,
+			Name:        "up",
+			Help:        "Was the last scrape of kafka connect successful?",
+			ConstLabels: prometheus.Labels{"scrape_host": targetURL.Hostname()},
 		}),
 	}
 
@@ -123,12 +126,12 @@ func main() {
 		os.Exit(2)
 	}
 
-	parseURI, err := url.Parse(*scrapeURI)
+	parsedURL, err := url.Parse(*scrapeURI)
 	if err != nil {
 		log.Errorf("%v", err)
 		os.Exit(1)
 	}
-	if !supportedSchema[parseURI.Scheme] {
+	if !supportedSchema[parsedURL.Scheme] {
 		log.Error("schema not supported")
 		os.Exit(1)
 	}
@@ -137,7 +140,7 @@ func main() {
 
 	prometheus.Unregister(prometheus.NewGoCollector())
 	prometheus.Unregister(prometheus.NewProcessCollector(prometheus.ProcessCollectorOpts{}))
-	prometheus.MustRegister(newExporter(*scrapeURI))
+	prometheus.MustRegister(newExporter(*parsedURL))
 
 	http.Handle(*metricsPath, promhttp.Handler())
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
