@@ -1,6 +1,7 @@
 BSD 2-Clause License
 
-Copyright (c) 2018, AJ
+Copyright (c) 2018, AJ (for code prior to f608da572d4d4d22584db0d52a30bacb1f27f6dd)
+Copyright (c) 2020, Lucas Jenss (for code starting at f608da572d4d4d22584db0d52a30bacb1f27f6dd)
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
